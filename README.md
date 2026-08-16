@@ -1,0 +1,1 @@
+# eufymake-studio-windows-thumbnails
