@@ -6,10 +6,12 @@
 #include <algorithm>
 #include <cstring>
 #include <string>
+#include <wincrypt.h>
 
 #include "miniz.h"
 
 #pragma comment(lib, "bcrypt.lib")
+#pragma comment(lib, "crypt32.lib")
 
 namespace {
 
@@ -26,6 +28,16 @@ bool IsZip(const uint8_t* data, size_t size) {
 bool LooksLikePng(const uint8_t* data, size_t size) {
     static const uint8_t kPng[] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
     return size >= sizeof(kPng) && memcmp(data, kPng, sizeof(kPng)) == 0;
+}
+
+bool LooksLikeImage(const uint8_t* data, size_t size) {
+    if (LooksLikePng(data, size)) {
+        return true;
+    }
+    if (size >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF) {
+        return true;
+    }
+    return size >= 12 && memcmp(data, "RIFF", 4) == 0 && memcmp(data + 8, "WEBP", 4) == 0;
 }
 
 bool EndsWithInsensitive(const std::string& value, const char* suffix) {
@@ -133,17 +145,79 @@ bool UnwrapToZip(const uint8_t* data, size_t size, std::vector<uint8_t>& zipStor
     return false;
 }
 
-bool ExtractBestPng(const uint8_t* zipData, size_t zipSize, std::vector<uint8_t>& pngOut) {
+bool ExtractZipIndex(mz_zip_archive& zip, mz_uint index, std::vector<uint8_t>& out) {
+    size_t outSize = 0;
+    void* bytes = mz_zip_reader_extract_to_heap(&zip, index, &outSize, 0);
+    if (!bytes || outSize == 0) {
+        return false;
+    }
+    out.assign(static_cast<const uint8_t*>(bytes), static_cast<const uint8_t*>(bytes) + outSize);
+    mz_free(bytes);
+    return true;
+}
+
+bool DecodeDataUriImage(const std::vector<uint8_t>& uri, std::vector<uint8_t>& imageOut) {
+    if (uri.size() < 16 || memcmp(uri.data(), "data:image/", 11) != 0) {
+        return false;
+    }
+    const auto comma = std::find(uri.begin(), uri.end(), static_cast<uint8_t>(','));
+    if (comma == uri.end()) {
+        return false;
+    }
+    const DWORD b64Len = static_cast<DWORD>(uri.end() - (comma + 1));
+    if (b64Len == 0) {
+        return false;
+    }
+    DWORD decodedLen = 0;
+    if (!CryptStringToBinaryA(reinterpret_cast<const char*>(&*(comma + 1)), b64Len, CRYPT_STRING_BASE64,
+                              nullptr, &decodedLen, nullptr, nullptr) ||
+        decodedLen == 0) {
+        return false;
+    }
+    imageOut.resize(decodedLen);
+    if (!CryptStringToBinaryA(reinterpret_cast<const char*>(&*(comma + 1)), b64Len, CRYPT_STRING_BASE64,
+                              imageOut.data(), &decodedLen, nullptr, nullptr)) {
+        imageOut.clear();
+        return false;
+    }
+    imageOut.resize(decodedLen);
+    return LooksLikeImage(imageOut.data(), imageOut.size());
+}
+
+void CollectDataUriImages(const std::vector<uint8_t>& text, std::vector<std::vector<uint8_t>>& images) {
+    const char marker[] = "data:image/";
+    size_t pos = 0;
+    while (pos + 11 < text.size()) {
+        const auto it = std::search(text.begin() + static_cast<std::ptrdiff_t>(pos), text.end(),
+                                    marker, marker + 11);
+        if (it == text.end()) {
+            break;
+        }
+        const size_t start = static_cast<size_t>(it - text.begin());
+        size_t end = start;
+        while (end < text.size() && text[end] != '"' && text[end] != '\'' && text[end] != '<' &&
+               text[end] != ' ') {
+            ++end;
+        }
+        std::vector<uint8_t> uri(text.begin() + static_cast<std::ptrdiff_t>(start),
+                                 text.begin() + static_cast<std::ptrdiff_t>(end));
+        pos = end + 1;
+
+        std::vector<uint8_t> decoded;
+        if (DecodeDataUriImage(uri, decoded) && decoded.size() > 16 * 1024) {
+            images.push_back(std::move(decoded));
+        }
+    }
+}
+
+bool ExtractPreviewImagesFromZip(const uint8_t* zipData, size_t zipSize, EmpfPreviewImages& images) {
+    images = {};
     mz_zip_archive zip = {};
     if (!mz_zip_reader_init_mem(&zip, zipData, zipSize, 0)) {
         return false;
     }
 
     const mz_uint fileCount = mz_zip_reader_get_num_files(&zip);
-    int preferred = -1;
-    int fallback = -1;
-    mz_uint64 fallbackSize = 0;
-
     for (mz_uint i = 0; i < fileCount; ++i) {
         mz_zip_archive_file_stat stat = {};
         if (!mz_zip_reader_file_stat(&zip, i, &stat) || stat.m_is_directory) {
@@ -151,42 +225,43 @@ bool ExtractBestPng(const uint8_t* zipData, size_t zipSize, std::vector<uint8_t>
         }
 
         const std::string name = stat.m_filename;
-        if (EndsWithInsensitive(name, "thumbnail.png") ||
-            _stricmp(name.c_str(), "Asset/images/thumbnail.png") == 0) {
-            preferred = static_cast<int>(i);
-            break;
+        std::vector<uint8_t> bytes;
+        if (!ExtractZipIndex(zip, i, bytes)) {
+            continue;
         }
-        if (EndsWithInsensitive(name, ".png") && stat.m_uncomp_size > fallbackSize) {
-            fallback = static_cast<int>(i);
-            fallbackSize = stat.m_uncomp_size;
+
+        if (EndsWithInsensitive(name, "thumbnail.png") || EndsWithInsensitive(name, ".png")) {
+            if (LooksLikePng(bytes.data(), bytes.size())) {
+                if (EndsWithInsensitive(name, "thumbnail.png") || images.thumbnailPng.empty()) {
+                    images.thumbnailPng = std::move(bytes);
+                }
+            }
+            continue;
+        }
+
+        if (EndsWithInsensitive(name, ".dat")) {
+            std::vector<uint8_t> decoded;
+            if (DecodeDataUriImage(bytes, decoded)) {
+                images.layerPngs.push_back(std::move(decoded));
+            }
+            continue;
+        }
+
+        if (EndsWithInsensitive(name, ".json") && name.find("canvas") != std::string::npos) {
+            CollectDataUriImages(bytes, images.layerPngs);
         }
     }
 
-    const int chosen = preferred >= 0 ? preferred : fallback;
-    if (chosen < 0) {
-        mz_zip_reader_end(&zip);
-        return false;
-    }
-
-    size_t outSize = 0;
-    void* bytes = mz_zip_reader_extract_to_heap(&zip, static_cast<mz_uint>(chosen), &outSize, 0);
     mz_zip_reader_end(&zip);
-    if (!bytes || outSize == 0) {
-        return false;
-    }
-
-    const bool ok = LooksLikePng(static_cast<const uint8_t*>(bytes), outSize);
-    if (ok) {
-        pngOut.assign(static_cast<const uint8_t*>(bytes), static_cast<const uint8_t*>(bytes) + outSize);
-    }
-    mz_free(bytes);
-    return ok;
+    std::sort(images.layerPngs.begin(), images.layerPngs.end(),
+              [](const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) { return a.size() > b.size(); });
+    return !images.thumbnailPng.empty() || !images.layerPngs.empty();
 }
 
 }  // namespace
 
-bool ExtractEmpfPreviewPng(const uint8_t* data, size_t size, std::vector<uint8_t>& pngOut) {
-    pngOut.clear();
+bool ExtractEmpfPreviewImages(const uint8_t* data, size_t size, EmpfPreviewImages& images) {
+    images = {};
     if (!data || size < 4) {
         return false;
     }
@@ -197,7 +272,29 @@ bool ExtractEmpfPreviewPng(const uint8_t* data, size_t size, std::vector<uint8_t
     if (!UnwrapToZip(data, size, zipStorage, zipData, zipSize)) {
         return false;
     }
-    return ExtractBestPng(zipData, zipSize, pngOut);
+    return ExtractPreviewImagesFromZip(zipData, zipSize, images);
+}
+
+bool ExtractEmpfPreviewPng(const uint8_t* data, size_t size, std::vector<uint8_t>& pngOut) {
+    pngOut.clear();
+    EmpfPreviewImages images;
+    if (!ExtractEmpfPreviewImages(data, size, images)) {
+        return false;
+    }
+    if (!images.layerPngs.empty() &&
+        (images.thumbnailPng.empty() || images.layerPngs.front().size() > images.thumbnailPng.size() * 4)) {
+        pngOut = std::move(images.layerPngs.front());
+        return true;
+    }
+    if (!images.thumbnailPng.empty()) {
+        pngOut = std::move(images.thumbnailPng);
+        return true;
+    }
+    if (!images.layerPngs.empty()) {
+        pngOut = std::move(images.layerPngs.front());
+        return true;
+    }
+    return false;
 }
 
 bool ExtractEmpfPreviewPngFromFile(const wchar_t* path, std::vector<uint8_t>& pngOut) {

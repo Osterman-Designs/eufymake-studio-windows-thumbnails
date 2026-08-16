@@ -14,6 +14,22 @@ Double-click still opens eufyMake Studio. This project only adds a visual handle
 - Per-user registration — no administrator account required
 - Does not take over the `.empf` file type from eufyMake Studio
 
+## Install
+
+Windows 10/11 64-bit. No administrator account required.
+
+1. Build `EmpfThumbsSetup.exe` (below) or use a Release build of it.
+2. Run `EmpfThumbsSetup.exe`.
+3. Open a folder of `.empf` files in large or extra-large icons. Preview pane: `Alt+P`.
+
+Uninstall from **Settings → Apps**, or:
+
+```powershell
+& "$env:LOCALAPPDATA\EmpfThumbs\EmpfThumbsSetup.exe" /uninstall
+```
+
+Silent install: `EmpfThumbsSetup.exe /S`
+
 ## Requirements
 
 - Windows 10/11 64-bit
@@ -31,24 +47,11 @@ Outputs:
 
 | File | Purpose |
 |------|---------|
+| `build\Release\EmpfThumbsSetup.exe` | Per-user installer |
 | `build\Release\EmpfThumbs.dll` | Explorer thumbnail + preview handler |
 | `build\Release\empf-extract.exe` | Extract the embedded preview PNG from a file |
 
-## Install
-
-```powershell
-.\scripts\register.ps1
-```
-
-Then open a folder of `.empf` files in large or extra-large icons. Turn on the Preview pane with `Alt+P`.
-
-If Explorer still shows generic icons, press `F5` or reopen the folder so the thumbnail cache refreshes.
-
-## Uninstall
-
-```powershell
-.\scripts\unregister.ps1
-```
+Developers can still register a local build with `.\scripts\register.ps1`.
 
 ## Extract a preview without Explorer
 
@@ -58,7 +61,9 @@ If Explorer still shows generic icons, press `F5` or reopen the folder so the th
 
 ## How it works
 
-`.empf` project files are ZIP archives. Current eufyMake Studio exports wrap that ZIP in an `eufyMake` header. The handler unwraps the archive and shows `Asset/images/thumbnail.png` when present, otherwise the largest PNG in the file.
+`.empf` project files are ZIP archives. Current eufyMake Studio exports wrap that ZIP in an `eufyMake` header. The handler unwraps the archive and prefers the largest canvas or `.dat` image (PNG, JPEG, or WebP), falling back to `Asset/images/thumbnail.png`.
+
+The first CMake configure downloads [libwebp](https://github.com/webmproject/libwebp) so Explorer's thumbnail host can decode WebP without the Store codec pack.
 
 Format notes follow the MIT [empf-web-preview](https://github.com/Davidobot/empf-web-preview) parser. ZIP inflate is [miniz](vendor/miniz) (MIT).
 
@@ -67,3 +72,4 @@ Format notes follow the MIT [empf-web-preview](https://github.com/Davidobot/empf
 - [Davidobot/empf-web-preview](https://github.com/Davidobot/empf-web-preview) — published EMPF layout used for compatibility
 - [TapuCosmo/empf-generator](https://github.com/TapuCosmo/empf-generator) — older ZIP-style EMPF shape
 - [richgel999/miniz](https://github.com/richgel999/miniz) — ZIP inflate
+- [webmproject/libwebp](https://github.com/webmproject/libwebp) — WebP decode

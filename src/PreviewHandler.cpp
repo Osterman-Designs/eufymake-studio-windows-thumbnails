@@ -155,12 +155,12 @@ IFACEMETHODIMP EmpfPreviewHandler::DoPreview() {
     }
 
     if (!m_bitmap) {
-        std::vector<uint8_t> png;
-        if (!ExtractEmpfPreviewPng(m_bytes.data(), m_bytes.size(), png)) {
+        EmpfPreviewImages images;
+        if (!ExtractEmpfPreviewImages(m_bytes.data(), m_bytes.size(), images)) {
             return E_FAIL;
         }
         bool hasAlpha = true;
-        if (!PngToHBitmap(png.data(), png.size(), 1024, &m_bitmap, &hasAlpha)) {
+        if (!EmpfImagesToHBitmap(images, 1024, &m_bitmap, &hasAlpha)) {
             return E_FAIL;
         }
     }

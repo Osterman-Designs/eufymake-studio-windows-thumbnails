@@ -22,6 +22,35 @@ HRESULT SetSz(HKEY root, const wchar_t* path, const wchar_t* name, const wchar_t
     return hr;
 }
 
+HRESULT SetDword(HKEY root, const wchar_t* path, const wchar_t* name, DWORD value) {
+    HKEY key = nullptr;
+    const LSTATUS status = RegCreateKeyExW(root, path, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr);
+    if (status != ERROR_SUCCESS) {
+        return HRESULT_FROM_WIN32(status);
+    }
+    const HRESULT hr = HRESULT_FROM_WIN32(RegSetValueExW(
+        key, name, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value)));
+    RegCloseKey(key);
+    return hr;
+}
+
+HRESULT DeleteValue(HKEY root, const wchar_t* path, const wchar_t* name) {
+    HKEY key = nullptr;
+    const LSTATUS status = RegOpenKeyExW(root, path, 0, KEY_SET_VALUE, &key);
+    if (status == ERROR_FILE_NOT_FOUND || status == ERROR_PATH_NOT_FOUND) {
+        return S_OK;
+    }
+    if (status != ERROR_SUCCESS) {
+        return HRESULT_FROM_WIN32(status);
+    }
+    const LSTATUS del = RegDeleteValueW(key, name);
+    RegCloseKey(key);
+    if (del == ERROR_FILE_NOT_FOUND || del == ERROR_SUCCESS) {
+        return S_OK;
+    }
+    return HRESULT_FROM_WIN32(del);
+}
+
 HRESULT DeleteKeyTree(HKEY root, const wchar_t* path) {
     const LSTATUS status = RegDeleteTreeW(root, path);
     if (status == ERROR_FILE_NOT_FOUND || status == ERROR_PATH_NOT_FOUND) {
@@ -89,6 +118,17 @@ STDAPI DllRegisterServer() {
     if (SUCCEEDED(hr)) {
         hr = RegisterAssociation(L"eufy.Studio.1");
     }
+    // Photo treatment + empty TypeOverlay keeps Studio's DefaultIcon
+    // from being drawn as a badge on Explorer thumbnails.
+    if (SUCCEEDED(hr)) {
+        hr = SetSz(HKEY_CURRENT_USER, L"Software\\Classes\\.empf", L"PerceivedType", L"image");
+    }
+    if (SUCCEEDED(hr)) {
+        hr = SetDword(HKEY_CURRENT_USER, L"Software\\Classes\\eufy.Studio.1", L"Treatment", 1);
+    }
+    if (SUCCEEDED(hr)) {
+        hr = SetSz(HKEY_CURRENT_USER, L"Software\\Classes\\eufy.Studio.1", L"TypeOverlay", L"");
+    }
     if (SUCCEEDED(hr)) {
         hr = SetSz(HKEY_CURRENT_USER,
                    L"Software\\Microsoft\\Windows\\CurrentVersion\\PreviewHandlers",
@@ -123,6 +163,9 @@ STDAPI DllUnregisterServer() {
     DeleteKeyTree(HKEY_CURRENT_USER, empfPreview);
     DeleteKeyTree(HKEY_CURRENT_USER, studioThumb);
     DeleteKeyTree(HKEY_CURRENT_USER, studioPreview);
+    DeleteValue(HKEY_CURRENT_USER, L"Software\\Classes\\.empf", L"PerceivedType");
+    DeleteValue(HKEY_CURRENT_USER, L"Software\\Classes\\eufy.Studio.1", L"Treatment");
+    DeleteValue(HKEY_CURRENT_USER, L"Software\\Classes\\eufy.Studio.1", L"TypeOverlay");
 
     HKEY key = nullptr;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\PreviewHandlers",

@@ -67,13 +67,13 @@ IFACEMETHODIMP EmpfThumbnailProvider::GetThumbnail(UINT cx, HBITMAP* phbmp, WTS_
         return E_UNEXPECTED;
     }
 
-    std::vector<uint8_t> png;
-    if (!ExtractEmpfPreviewPng(m_bytes.data(), m_bytes.size(), png)) {
+    EmpfPreviewImages images;
+    if (!ExtractEmpfPreviewImages(m_bytes.data(), m_bytes.size(), images)) {
         return E_FAIL;
     }
 
     bool hasAlpha = true;
-    if (!PngToHBitmap(png.data(), png.size(), cx ? cx : 256, phbmp, &hasAlpha)) {
+    if (!EmpfImagesToHBitmap(images, cx ? cx : 256, phbmp, &hasAlpha)) {
         return E_FAIL;
     }
     if (pdwAlpha) {

@@ -1,0 +1,10 @@
+if(NOT DLL OR NOT EXTRACT OR NOT OUT)
+    message(FATAL_ERROR "DLL, EXTRACT, and OUT are required")
+endif()
+
+file(TO_NATIVE_PATH "${DLL}" DLL_NATIVE)
+file(TO_NATIVE_PATH "${EXTRACT}" EXTRACT_NATIVE)
+string(REPLACE "\\" "\\\\" DLL_ESC "${DLL_NATIVE}")
+string(REPLACE "\\" "\\\\" EXTRACT_ESC "${EXTRACT_NATIVE}")
+
+file(WRITE "${OUT}" "#define IDR_EMPF_DLL 101\r\n#define IDR_EMPF_EXTRACT 102\r\nIDR_EMPF_DLL RCDATA \"${DLL_ESC}\"\r\nIDR_EMPF_EXTRACT RCDATA \"${EXTRACT_ESC}\"\r\n")
