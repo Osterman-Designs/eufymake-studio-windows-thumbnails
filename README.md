@@ -18,8 +18,8 @@ Double-click still opens eufyMake Studio. This project only adds a visual handle
 
 Windows 10/11 64-bit. No administrator account required.
 
-1. Build `EmpfThumbsSetup.exe` (below) or use a Release build of it.
-2. Run `EmpfThumbsSetup.exe`.
+1. Download [EmpfThumbsSetup.exe](https://github.com/Osterman-Designs/eufymake-studio-windows-thumbnails/releases/latest/download/EmpfThumbsSetup.exe) from the latest [Release](https://github.com/Osterman-Designs/eufymake-studio-windows-thumbnails/releases/latest).
+2. Run it. SmartScreen may warn because the installer is not code-signed — choose **More info → Run anyway**.
 3. Open a folder of `.empf` files in large or extra-large icons. Preview pane: `Alt+P`.
 
 Uninstall from **Settings → Apps**, or:
@@ -33,8 +33,8 @@ Silent install: `EmpfThumbsSetup.exe /S`
 ## Requirements
 
 - Windows 10/11 64-bit
-- [CMake](https://cmake.org/) 3.20+
-- Visual Studio 2022 or 2026 with the C++ desktop workload
+
+To build from source you also need [CMake](https://cmake.org/) 3.20+ and Visual Studio 2022 or 2026 with the C++ desktop workload.
 
 ## Build
 
